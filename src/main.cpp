@@ -9,28 +9,23 @@
 #include <freertos/task.h>
 
 // ============ FIRMWARE VERSION ============
-// ⚠️  KEEP THIS IN SYNC WITH /version.txt IN YOUR REPO
-// GitHub Actions reads version.txt and uses it as the release tag.
-// This constant is what the running ESP32 compares against.
-#define FIRMWARE_VERSION "1.0.4"
+#define FIRMWARE_VERSION "1.0.5"
 
 // ============ CONFIGURATION ============
-
 #ifndef LED_BUILTIN
   #define LED_BUILTIN 2
 #endif
 
-#define LED_PIN       LED_BUILTIN
+#define LED_PIN        LED_BUILTIN
 #define BLINK_DELAY_MS 2000
 
 // WiFi Credentials
 const char* ssid     = "TRINITY";
 const char* password = "Trinity@unifi";
 
-// GitHub OTA URLs — always points to latest release assets
+// GitHub OTA URLs
 const char* otaVersionUrl =
   "https://github.com/PravallikaVanjarapu57/esp-ota/releases/latest/download/version.txt";
-
 const char* otaBinUrl =
   "https://github.com/PravallikaVanjarapu57/esp-ota/releases/latest/download/firmware.bin";
 
@@ -38,32 +33,6 @@ const char* otaBinUrl =
 const char* ntpServer          = "pool.ntp.org";
 const long  gmtOffset_sec      = 0;
 const int   daylightOffset_sec = 0;
-
-// ============ ROOT CA FOR GITHUB (DigiCert Global Root CA) ============
-static const char* GITHUB_ROOT_CA = R"EOF(
------BEGIN CERTIFICATE-----
-MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh
-MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
-d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD
-QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT
-MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j
-b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMB4XDTA2MTExMDAw
-MDAwMFoXDTMxMTExMDAwMDAwMFowYTELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERp
-Z2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEgMB4GA1UEAxMX
-RGlnaUNlcnQgR2xvYmFsIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAw
-ggEKAoIBAQDiO+ERct91HcdyoVf68YlI4m4DSY3bzvOHXPCBd8VFWqbY8BE+HEoV
-3e7E9hEnRGDtfOEHyAFqbdMGABHKBATmGGMYcdiuB1bHQ08SqiSSDGJ2ZbkCGQoT
-eBYCrSMRmMGEFRd8aNLdXSCexlS38tWzBUwCGYT0fgs5oKnfhyHyQk0MBOKkSCoq
-mVKpDboFMGFbLwIDAQABo2MwYTAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUw
-AwEB/zAdBgNVHQ4EFgQUA95QNVbRTLtm8KPiGxvDl7I90VUwHwYDVR0jBBgwFoAU
-A95QNVbRTLtm8KPiGxvDl7I90VUwDQYJKoZIhvcNAQEFBQADggEBAMucN6pIExIK
-7cCJ7c3TATQdFNFhV7V1PcalIMQnGg9T3t9KfZNbD0kY/lyGYJJBcpJKGLbhJbEv
-taSEMD1pIxQVDVRBc1m2S6cSShbJQ1OaanUO7sDkRjBPgmJ2BBYV0TSmM8OAuFh5
-nRhgaP+P+D5HnxJw9Dws3BoML2E5U8tFqerHOCJYIL8LlPgW9yUiuMXMKZ8e5e6V
-qMVWdZ7OEqdwWpb6bVIc05e4L6VT3JFCQ4Pk0U+A2Rm8n8xQhWXKkUbsymO0wOe
-JORrOFHPsBg8Km7SxOWI0sxU7b2F7Qb3VK/u/e5FsGMiJvnC8FMWP1Xr+HYkGY=
------END CERTIFICATE-----
-)EOF";
 
 // ============ GLOBAL STATE ============
 Preferences preferences;
@@ -86,11 +55,6 @@ TaskHandle_t internetTaskHandle    = NULL;
 
 // ============ HELPERS ============
 
-/**
- * Semantic version comparison.
- * Returns true if remoteVer is strictly newer than localVer.
- * Format: "MAJOR.MINOR.PATCH"
- */
 bool isNewerVersion(const String& localVer, const String& remoteVer) {
   if (localVer == remoteVer) return false;
 
@@ -105,15 +69,13 @@ bool isNewerVersion(const String& localVer, const String& remoteVer) {
   return rPat > lPat;
 }
 
-/**
- * Fetch a URL over HTTPS and return body as String.
- */
+// Fetch URL using insecure HTTPS (skips cert verification — works with GitHub redirects)
 String httpsGetString(const char* url, int& httpCode) {
   WiFiClientSecure client;
-  client.setCACert(GITHUB_ROOT_CA);
+  client.setInsecure();
 
   HTTPClient http;
-  http.setTimeout(10000);
+  http.setTimeout(15000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   if (!http.begin(client, url)) {
@@ -214,8 +176,7 @@ void ntp_sync_task(void *parameter) {
 
 // ============ OTA TASK ============
 void ota_check_task(void *parameter) {
-  // Give system time to connect before first check
-  vTaskDelay(15000 / portTICK_PERIOD_MS);
+  vTaskDelay(20000 / portTICK_PERIOD_MS); // Wait for internet before first check
 
   while (1) {
     if (wifi_connected && internet_ok) {
@@ -223,7 +184,7 @@ void ota_check_task(void *parameter) {
       Serial.println("[OTA] Checking for update...");
       Serial.println("[OTA] Running version: " + currentVersion);
 
-      // ── Step 1: Fetch remote version.txt from GitHub ──────────
+      // Step 1: Fetch version.txt from GitHub Release
       int httpCode = 0;
       String remoteVersion = httpsGetString(otaVersionUrl, httpCode);
 
@@ -237,21 +198,21 @@ void ota_check_task(void *parameter) {
       Serial.println("[OTA] Remote version : " + remoteVersion);
       Serial.println("[OTA] Current version: " + currentVersion);
 
-      // ── Step 2: Compare — only update if remote is NEWER ──────
+      // Step 2: Compare versions
       if (!isNewerVersion(currentVersion, remoteVersion)) {
-        Serial.println("[OTA] Already up to date ✓");
+        Serial.println("[OTA] Already up to date");
         vTaskDelay(60000 / portTICK_PERIOD_MS);
         continue;
       }
 
-      Serial.println("[OTA] New version available! Starting download...");
+      Serial.println("[OTA] New version found! Downloading firmware...");
 
-      // ── Step 3: Download firmware.bin ─────────────────────────
+      // Step 3: Download firmware.bin
       WiFiClientSecure client;
-      client.setCACert(GITHUB_ROOT_CA);
+      client.setInsecure();
 
       HTTPClient httpUpdate;
-      httpUpdate.setTimeout(60000);   // 60s — binary can be large
+      httpUpdate.setTimeout(60000);
       httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
       if (!httpUpdate.begin(client, otaBinUrl)) {
@@ -286,7 +247,7 @@ void ota_check_task(void *parameter) {
         continue;
       }
 
-      // ── Step 4: Flash firmware ─────────────────────────────────
+      // Step 4: Flash
       if (!Update.begin(contentLength)) {
         Serial.printf("[OTA] Update.begin failed: %s\n", Update.errorString());
         httpUpdate.end();
@@ -312,18 +273,18 @@ void ota_check_task(void *parameter) {
         continue;
       }
 
-      // ── Step 5: Save new version and reboot ───────────────────
+      // Step 5: Save version and reboot
       preferences.putString("version", remoteVersion);
-      Serial.printf("[OTA] ✅ Update to v%s successful! Rebooting...\n",
+      Serial.printf("[OTA] Update to v%s successful! Rebooting...\n",
                     remoteVersion.c_str());
       delay(1000);
       ESP.restart();
 
     } else {
-      Serial.println("[OTA] Skipping — no internet");
+      Serial.println("[OTA] Skipping - no internet");
     }
 
-    vTaskDelay(60000 / portTICK_PERIOD_MS);   // check every 60 seconds
+    vTaskDelay(60000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -334,19 +295,16 @@ void blink_task(void *parameter) {
 
   while (1) {
     if (wifi_connected && internet_ok) {
-      // Fast blink = fully online
       digitalWrite(LED_PIN, HIGH);
       vTaskDelay((BLINK_DELAY_MS / 2) / portTICK_PERIOD_MS);
       digitalWrite(LED_PIN, LOW);
       vTaskDelay((BLINK_DELAY_MS / 2) / portTICK_PERIOD_MS);
     } else if (wifi_connected) {
-      // Slow blink = WiFi but no internet
       digitalWrite(LED_PIN, HIGH);
       vTaskDelay(800 / portTICK_PERIOD_MS);
       digitalWrite(LED_PIN, LOW);
       vTaskDelay(200 / portTICK_PERIOD_MS);
     } else {
-      // Off = no WiFi
       digitalWrite(LED_PIN, LOW);
       vTaskDelay(100 / portTICK_PERIOD_MS);
     }
@@ -390,11 +348,8 @@ void setup() {
 
   preferences.begin("ota", false);
 
-  // On first boot, currentVersion comes from the compiled constant.
-  // After an OTA update, it reads back what was saved by the OTA task.
   String savedVersion = preferences.getString("version", "");
   if (savedVersion.isEmpty()) {
-    // First ever boot — persist the compiled-in version
     preferences.putString("version", FIRMWARE_VERSION);
     currentVersion = FIRMWARE_VERSION;
   } else {
