@@ -12,7 +12,7 @@
 // ⚠️  KEEP THIS IN SYNC WITH /version.txt IN YOUR REPO
 // GitHub Actions reads version.txt and uses it as the release tag.
 // This constant is what the running ESP32 compares against.
-#define FIRMWARE_VERSION "1.0.1"
+#define FIRMWARE_VERSION "1.0.4"
 
 // ============ CONFIGURATION ============
 
